@@ -802,6 +802,9 @@ func resourceDatadogSyntheticsTestCreate(ctx context.Context, d *schema.Resource
 			// Note that Id won't be set, so no state will be saved.
 			return utils.TranslateClientErrorDiag(err, httpResponse, "error creating synthetics API test")
 		}
+		if err := utils.CheckForUnparsed(createdSyntheticsTest); err != nil {
+			return diag.FromErr(err)
+		}
 
 		// If the Create callback returns with or without an error without an ID set using SetId,
 		// the resource is assumed to not be created, and no state is saved.
@@ -814,6 +817,9 @@ func resourceDatadogSyntheticsTestCreate(ctx context.Context, d *schema.Resource
 		if err != nil {
 			// Note that Id won't be set, so no state will be saved.
 			return utils.TranslateClientErrorDiag(err, httpResponse, "error creating synthetics browser test")
+		}
+		if err := utils.CheckForUnparsed(createdSyntheticsTest); err != nil {
+			return diag.FromErr(err)
 		}
 
 		// If the Create callback returns with or without an error without an ID set using SetId,
@@ -847,6 +853,9 @@ func resourceDatadogSyntheticsTestRead(ctx context.Context, d *schema.ResourceDa
 		}
 		return utils.TranslateClientErrorDiag(err, httpresp, "error getting synthetics test")
 	}
+	if err := utils.CheckForUnparsed(syntheticsTest); err != nil {
+		return diag.FromErr(err)
+	}
 
 	if syntheticsTest.GetType() == datadogV1.SYNTHETICSTESTDETAILSTYPE_BROWSER {
 		syntheticsBrowserTest, _, err = datadogClientV1.SyntheticsApi.GetBrowserTest(authV1, d.Id())
@@ -864,9 +873,15 @@ func resourceDatadogSyntheticsTestRead(ctx context.Context, d *schema.ResourceDa
 	}
 
 	if syntheticsTest.GetType() == datadogV1.SYNTHETICSTESTDETAILSTYPE_BROWSER {
+		if err := utils.CheckForUnparsed(syntheticsBrowserTest); err != nil {
+			return diag.FromErr(err)
+		}
 		return updateSyntheticsBrowserTestLocalState(d, &syntheticsBrowserTest)
 	}
 
+	if err := utils.CheckForUnparsed(syntheticsAPITest); err != nil {
+		return diag.FromErr(err)
+	}
 	return updateSyntheticsAPITestLocalState(d, &syntheticsAPITest)
 }
 
@@ -884,6 +899,9 @@ func resourceDatadogSyntheticsTestUpdate(ctx context.Context, d *schema.Resource
 			// If the Update callback returns with or without an error, the full state is saved.
 			return utils.TranslateClientErrorDiag(err, httpResponse, "error updating synthetics API test")
 		}
+		if err := utils.CheckForUnparsed(updatedTest); err != nil {
+			return diag.FromErr(err)
+		}
 		return updateSyntheticsAPITestLocalState(d, &updatedTest)
 	} else if testType == datadogV1.SYNTHETICSTESTDETAILSTYPE_BROWSER {
 		syntheticsTest := buildSyntheticsBrowserTestStruct(d)
@@ -891,6 +909,9 @@ func resourceDatadogSyntheticsTestUpdate(ctx context.Context, d *schema.Resource
 		if err != nil {
 			// If the Update callback returns with or without an error, the full state is saved.
 			return utils.TranslateClientErrorDiag(err, httpResponse, "error updating synthetics browser test")
+		}
+		if err := utils.CheckForUnparsed(updatedTest); err != nil {
+			return diag.FromErr(err)
 		}
 		return updateSyntheticsBrowserTestLocalState(d, &updatedTest)
 	}
@@ -1385,6 +1406,31 @@ func buildSyntheticsBrowserTestStruct(d *schema.ResourceData) *datadogV1.Synthet
 		}
 	}
 
+	configVariables := make([]datadogV1.SyntheticsConfigVariable, 0)
+
+	if attr, ok := d.GetOk("config_variable"); ok && attr != nil {
+		for _, v := range attr.([]interface{}) {
+			variableMap := v.(map[string]interface{})
+			variable := datadogV1.SyntheticsConfigVariable{}
+
+			variable.SetName(variableMap["name"].(string))
+			variable.SetType(datadogV1.SyntheticsConfigVariableType(variableMap["type"].(string)))
+
+			if variable.GetType() != "global" {
+				variable.SetPattern(variableMap["pattern"].(string))
+				variable.SetExample(variableMap["example"].(string))
+			}
+
+			if variableMap["id"] != "" {
+				variable.SetId(variableMap["id"].(string))
+			}
+
+			configVariables = append(configVariables, variable)
+		}
+	}
+
+	config.SetConfigVariables(configVariables)
+
 	options := datadogV1.NewSyntheticsTestOptions()
 
 	if attr, ok := d.GetOk("options_list"); ok && attr != nil {
@@ -1719,6 +1765,35 @@ func updateSyntheticsBrowserTestLocalState(d *schema.ResourceData, syntheticsTes
 	localAssertions := make([]map[string]interface{}, 0)
 
 	if err := d.Set("assertion", localAssertions); err != nil {
+		return diag.FromErr(err)
+	}
+
+	configVariables := config.GetConfigVariables()
+	localConfigVariables := make([]map[string]interface{}, len(configVariables))
+	for i, configVariable := range configVariables {
+		localVariable := make(map[string]interface{})
+		if v, ok := configVariable.GetTypeOk(); ok {
+			localVariable["type"] = *v
+		}
+		if v, ok := configVariable.GetNameOk(); ok {
+			localVariable["name"] = *v
+		}
+
+		if configVariable.GetType() != "global" {
+			if v, ok := configVariable.GetExampleOk(); ok {
+				localVariable["example"] = *v
+			}
+			if v, ok := configVariable.GetPatternOk(); ok {
+				localVariable["pattern"] = *v
+			}
+		}
+		if v, ok := configVariable.GetIdOk(); ok {
+			localVariable["id"] = *v
+		}
+		localConfigVariables[i] = localVariable
+	}
+
+	if err := d.Set("config_variable", localConfigVariables); err != nil {
 		return diag.FromErr(err)
 	}
 
