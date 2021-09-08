@@ -972,6 +972,10 @@ func buildDatadogWidget(terraformWidget map[string]interface{}) (*datadogV1.Widg
 		if geomapDefinition, ok := def[0].(map[string]interface{}); ok {
 			definition = datadogV1.GeomapWidgetDefinitionAsWidgetDefinition(buildDatadogGeomapDefinition(geomapDefinition))
 		}
+	} else if def, ok := terraformWidget["list_stream_definition"].([]interface{}); ok && len(def) > 0 {
+		if listStreamDefinition, ok := def[0].(map[string]interface{}); ok {
+			definition = datadogV1.ListStreamWidgetDefinitionAsWidgetDefinition(buildDatadogListStreamDefinition(listStreamDefinition))
+		}
 	} else {
 		return nil, fmt.Errorf("failed to find valid definition in widget configuration")
 	}
@@ -1117,6 +1121,10 @@ func buildTerraformWidget(datadogWidget datadogV1.Widget, k *utils.ResourceDataK
 		terraformDefinition := buildTerraformGeomapDefinition(*widgetDefinition.GeomapWidgetDefinition, k.Add("geomap_definition.0"))
 		k.Remove("geomap_definition.0")
 		terraformWidget["geomap_definition"] = []map[string]interface{}{terraformDefinition}
+	} else if widgetDefinition.ListStreamWidgetDefinition != nil {
+		terraformDefinition := buildTerraformListStreamDefinition(*widgetDefinition.ListStreamWidgetDefinition, k.Add("list_stream_definition.0"))
+		k.Remove("list_stream_definition.0")
+		terraformWidget["list_stream_definition"] = []map[string]interface{}{terraformDefinition}
 	} else {
 		return nil, fmt.Errorf("unsupported widget type: %s", widgetDefinition.GetActualInstance())
 	}
@@ -4524,13 +4532,11 @@ func getListStreamRequestSchema() map[string]*schema.Schema {
 					"data_source": {
 						Description: "Source from which to query items to display in the stream.",
 						Type:        schema.TypeInt,
-						Computed:    true,
 						Optional:    false,
 					},
 					"query_string": {
 						Description: "Widget query.",
 						Type:        schema.TypeString,
-						Computed:    true,
 						Optional:    false,
 					},
 					"indexes": {
